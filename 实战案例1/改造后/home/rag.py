@@ -1,44 +1,66 @@
 import json
 import os
-
 import requests
 
+from openai import OpenAI
 from .models import 对话记录
 
+chat_base_url = os.getenv('OPENAI_BASE_URL', 'https://api.deepseek.com/v1')
+chat_model = os.getenv('OPENAI_MODEL', 'deepseek-chat')
+chat_api_key = os.getenv('OPENAI_API_KEY', '')
+
 #region 跟具体大模型相关的，如果需要修改大模型，可能需要修改这部分函数
-def get_access_token():
-  ernie_client_id = os.getenv("baiduclientid")
-  ernie_client_secret = os.getenv("baiduclientsecret")
-  url = f"https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id={ernie_client_id}&client_secret={ernie_client_secret}"
-  
-  playload = json.dumps("")
-  headers = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
-  }
-  response = requests.request("POST", url, headers=headers, data=playload)
-  return response.json().get("access_token")
+# def get_access_token():
+#   ernie_client_id = os.getenv("baiduclientid")
+#   ernie_client_secret = os.getenv("baiduclientsecret")
+#   url = f"https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id={ernie_client_id}&client_secret={ernie_client_secret}"
+#
+#   playload = json.dumps("")
+#   headers = {
+#       'Content-Type': 'application/json',
+#       'Accept': 'application/json'
+#   }
+#   response = requests.request("POST", url, headers=headers, data=playload)
+#   return response.json().get("access_token")
 
 def 对话模式(messages,用户输入,原文不带入大模型对话中,结果不带入大模型对话中):
-  url = "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/ernie-lite-8k?access_token=" + get_access_token()
-  
+  # url = "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/ernie-lite-8k?access_token=" + get_access_token()
+  #
+  # json_obj = {
+  #     "messages": messages,
+  # }
+  #
+  # playload = json.dumps(json_obj)
+  # headers = {
+  #     'Content-Type': 'application/json'
+  # }
+  #
+  # response = requests.request("POST", url, headers=headers, data=playload)
+  # json_result = json.loads(response.text)
+  # if "error_code" in json_result:
+  #   return json_result["error_msg"] + "：" + playload
+  # else:
+  #   处理后结果 = 对AI结果进一步处理(json_result["result"])
+  # 保存对话记录(messages[-1]["role"],用户输入,messages[-1]["content"],playload,原文不带入大模型对话中)
+  # 保存对话记录("assistant",json_result["result"],处理后结果,None,结果不带入大模型对话中)
+
   json_obj = {
-      "messages": messages,
+       "messages": messages,
   }
 
   playload = json.dumps(json_obj)
-  headers = {
-      'Content-Type': 'application/json'
-  }
-  
-  response = requests.request("POST", url, headers=headers, data=playload)
-  json_result = json.loads(response.text)
-  if "error_code" in json_result:
-    return json_result["error_msg"] + "：" + playload
-  else:
-    处理后结果 = 对AI结果进一步处理(json_result["result"])
-  保存对话记录(messages[-1]["role"],用户输入,messages[-1]["content"],playload,原文不带入大模型对话中)
-  保存对话记录("assistant",json_result["result"],处理后结果,None,结果不带入大模型对话中)
+  client = OpenAI(api_key=chat_api_key, base_url=chat_base_url)
+  resp = client.chat.completions.create(
+    model=chat_model,
+    messages=messages,
+  )
+  content = ''
+  if len(resp.choices) > 0 and resp.choices[0].message:
+    content += resp.choices[0].message.content
+  处理后结果 = 对AI结果进一步处理(content)
+  保存对话记录(messages[-1]["role"], 用户输入, messages[-1]["content"], playload, 原文不带入大模型对话中)
+  保存对话记录("assistant", content, 处理后结果, None, 结果不带入大模型对话中)
+
   return 处理后结果
 #endregion
 
@@ -73,17 +95,17 @@ def 构造解析用户输入并返回结构化数据用的messages(之前的用�
   示例1：
   用户：客户北京极客邦有限公司的款项到账了多少？
   系统：
-  {{'模块':1,'客户名称':'北京极客邦有限公司'}}
+  {{"模块":1,"客户名称":"北京极客邦有限公司"}}
 
   示例2：
   用户：你好
   系统：
-  {{'模块':6,'其他数据',None}}
+  {{"模块":6,"其他数据",None}}
 
   示例3：
   用户：最近一年你过得如何？
   系统：
-  {{'模块':6,'其他数据',None}}
+  {{"模块":6,"其他数据",None}}
 
   用户：{用户输入}
   系统：
@@ -116,7 +138,7 @@ def 构造全部messages(之前的messages,当前messages):
 def 对AI结果进一步处理(AI结果):
   处理后结果 = AI结果.replace("```json", '').replace("```", '') # 去掉json格式之外无关的内容
   处理后结果 = 处理后结果.replace("根据您所提供的信息，","") # 去掉开头的提示
-  return 处理后结果
+  return 处理后结果.strip()
 
 def 将查询结果转为字符串(查询结果):
   return_str = ""
@@ -154,7 +176,8 @@ def 获取结构化数据查询参数(用户输入):
       结构化数据 = 对话模式(构造解析用户输入并返回结构化数据用的messages(之前的用户输入,用户输入),用户输入,原文不带入大模型对话中=False,结果不带入大模型对话中=True)
       查询参数 = json.loads(结构化数据)
       return 查询参数
-    except:
+    except Exception as e:
+      print(e)
       当前重试次数 += 1
   
   return None
